@@ -14,8 +14,13 @@ Sway 技术方案采用“主 App + iOS Keyboard Extension + 后端 AI Gateway�
 
 - iOS only。
 - P0 直接包含主 App 与 iOS Keyboard Extension。
+- 同时交付后端管理系统，用于用量限制、模型策略、日志、样本和错误监控。
+- 六个模式进入 MVP：`rewrite | reply | opener | comfort | apologize | reject`。
+- 支持用户主动复制/粘贴与截图 OCR 提供上下文。
 - 账号、订阅和会员后置到 P3。
+- 第一版使用游客设备身份，预留登录扩展点。
 - LLM Provider 由用户在 App 内配置，首版由后端代理调用。
+- 生成语言支持中文和英文。
 - 历史和样本允许保存，保留 1 个月。
 - 发布方式为 TestFlight 内测。
 
@@ -42,6 +47,13 @@ Backend AI Gateway
   +-- Safety Filter
   +-- Model Provider
   +-- Metrics & Feedback
+  |
+Admin Web
+  |
+  +-- Usage Limit Config
+  +-- Prompt / Safety Config
+  +-- Request Logs / Errors
+  +-- Sample Management
 ```
 
 ## 3. iOS 能力边界
@@ -88,7 +100,9 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 - Full Access 权限解释。
 - Provider 配置、连通性测试和配置清除。
 - App 内输入/粘贴生成。
-- 截图 OCR 导入预留。
+- 截图 OCR 导入。
+- 中英文生成。
+- 游客设备身份，预留登录入口。
 - 收藏模板与个人风格设置。
 - 隐私设置、历史/样本保存说明和清除入口。
 - 问题反馈与 request_id 收集。
@@ -106,6 +120,7 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 
 - 改写当前输入。
 - 用户主动粘贴对方消息。
+- 处理截图 OCR/主 App 导入的上下文兜底。
 - 选择语气和场景。
 - 展示 3 条候选。
 - 插入候选文本。
@@ -128,13 +143,27 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 - 用户设备/安装 ID 识别。
 - Provider 配置加密存储。
 - 限流。
+- 用量限制配置与检查。
 - 模型代理调用。
 - Prompt 模板选择。
 - 内容安全检测。
 - 成本、延迟和错误指标。
 - 历史和样本 1 个月 TTL 存储。
+- 后端管理 API。
 
-### 5.2 Prompt & Policy Service
+### 5.2 Admin Web
+
+首版后台管理前端用于内测运营和质量观察，不面向普通用户。
+
+职责：
+
+- 配置用量限制：免费次数、频控、按设备/模型/模式统计。
+- 管理模型和 Prompt 策略。
+- 查看请求日志、usage、错误码、延迟和 token。
+- 查看和清理 1 个月内样本，敏感字段需要脱敏展示。
+- 查看安全策略命中和降级原因。
+
+### 5.3 Prompt & Policy Service
 
 按场景维护 Prompt、版本和安全策略：
 
@@ -227,6 +256,7 @@ Authorization: Bearer <token>
 - `draft`：用户草稿，可空，第一版上限 500 字。
 - `tone`：`gentle | humorous | flirty | sincere | concise | proactive | restrained`。
 - `relationship_stage`：`stranger | early_chat | dating | couple | conflict | unknown`。
+- `language`：`zh-CN | en-US`，首版支持中文和英文。
 - `length`：`short | medium`。
 - `count`：默认 3，第一版固定返回 3 条。
 
@@ -302,6 +332,8 @@ Authorization: Bearer <token>
 - `provider_configs`：用户 Provider、base_url、model、API Key 密文、最后校验时间。
 - `chat_histories`：用户生成历史，按 1 个月 TTL 清理。
 - `quality_samples`：允许保存的样本，按 1 个月 TTL 清理。
+- `usage_limits`：用量限制、频控、适用范围和生效状态。
+- `admin_audit_logs`：后台操作记录。
 
 数据策略：
 
@@ -336,6 +368,7 @@ Authorization: Bearer <token>
 - Provider 未配置：提示回主 App 配置模型。
 - Full Access 未开启：提示去主 App 生成，或使用本地模板。
 - 网络不可用：本地模板 + 重试。
+- OCR 失败：允许用户手动编辑识别文本或改用粘贴。
 - 模型超时：展示 `fallback_suggestion`。
 - 频控限制：提示稍后重试。
 - 安全拒绝：展示健康表达建议。
@@ -347,11 +380,17 @@ Authorization: Bearer <token>
 - 建立仓库结构。
 - iOS 主 App。
 - iOS Keyboard Extension。
+- 后台管理前端。
 - Provider 配置页与连通性测试。
 - 实现后端生成 API。
+- 实现后端管理 API。
 - 主 App 内输入/粘贴生成。
+- 截图 OCR 导入。
 - 键盘内改写、回复和插入候选。
 - Prompt 与安全策略回归。
+- 六个模式与中英文生成。
+- 游客设备身份与登录预留。
+- 用量限制后台配置。
 - 历史与样本 1 个月 TTL。
 
 ### P1：输入法体验完善

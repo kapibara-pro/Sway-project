@@ -2,6 +2,8 @@
 
 M1 后端目标是先跑通主 App 与 Keyboard Extension 共用的生成闭环：游客设备身份、Provider 配置、Provider 连通性测试、生成 API、统一错误码、request/usage 记录。
 
+M2 在保持接口兼容的基础上，将生成链路升级为六模式高情商 LLM Agent：客户端仍只传 `mode/language/tone/input_policy/peer_message/draft` 等结构化字段，后端负责按模式拼装 prompt、调用用户配置的 OpenAI-compatible Provider，并校验返回的 3 条候选。
+
 ## 1. 本地启动
 
 ```bash
@@ -193,6 +195,37 @@ X-Sway-Device-ID: device-demo
 }
 ```
 
+### 4.1 六模式 Agent 规则
+
+后端会按 `mode` 使用独立 Agent 策略：
+
+| mode | 目标 | 关键约束 |
+| --- | --- | --- |
+| `rewrite` | 改写用户草稿 | 保留原意，不新增事实，不替用户承诺 |
+| `reply` | 根据对方消息回复 | 接住情绪，避免操控、施压或制造愧疚 |
+| `opener` | 破冰开场 | 轻松、不油腻、不强行亲密 |
+| `comfort` | 安慰共情 | 先承接情绪，不说教、不诊断 |
+| `apologize` | 道歉修复 | 承担责任，解释但不甩锅，给修复动作 |
+| `reject` | 体面拒绝 | 边界明确，不给模糊希望，不攻击对方 |
+
+Provider 必须返回严格 JSON：
+
+```json
+{
+  "candidates": [
+    {
+      "text": "候选文案",
+      "tone_label": "更温柔",
+      "scenario_label": "reply",
+      "risk_level": "low",
+      "why_this_works": "先接住对方情绪，再给出轻松可接的话口。"
+    }
+  ]
+}
+```
+
+M2 mock provider 已改成六模式专属候选，便于 iOS 在无真实 LLM 时联调。真实 Provider 使用同一响应契约。
+
 ## 5. Request / Usage 记录
 
 M1 提供最小查询接口，便于 iOS 联调和后台页面接入：
@@ -229,3 +262,8 @@ GET /api/v1/chat-assist/requests?device_id=device-demo
   }
 }
 ```
+
+当前安全策略：
+
+- 威胁、跟踪、骚扰、未成年性化、自伤鼓励等高风险内容直接返回 `SAFETY_BLOCKED`。
+- 操控、施压、PUA、过度承诺等边界风险由 prompt 要求改写为健康表达，候选使用 `risk_level=medium`。

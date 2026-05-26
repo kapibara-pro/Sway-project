@@ -11,6 +11,7 @@ Sway（中文名：言和）是一款面向聊天场景的表达增强工具，�
 - [技术文档](docs/technical-design.md)
 - [开发排期](docs/development-plan.md)
 - [后端 API v1](docs/backend-api.md)
+- [LLM Agent 回归用例](docs/llm-agent-cases.md)
 - [iOS 联调说明](ios/README.md)
 
 ## 核心原则

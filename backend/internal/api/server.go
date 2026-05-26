@@ -310,7 +310,10 @@ func invalidField(field, reason string) *validationError {
 
 func safetyBlocked(req domain.GenerateRequest) (bool, string) {
 	text := strings.ToLower(req.PeerMessage + " " + req.Draft)
-	blocked := []string{"未成年", "自杀", "威胁", "跟踪", "骚扰"}
+	blocked := []string{
+		"未成年", "未成年人", "自杀", "威胁", "跟踪", "骚扰",
+		"minor", "underage", "suicide", "self-harm", "self harm", "threaten", "stalk", "harass",
+	}
 	for _, token := range blocked {
 		if strings.Contains(text, token) {
 			return true, "content safety policy matched"

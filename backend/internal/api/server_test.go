@@ -116,6 +116,29 @@ func TestGenerateWithMockProvider(t *testing.T) {
 	}
 }
 
+func TestGenerateSafetyBlocked(t *testing.T) {
+	st := store.NewMemoryStore()
+	s := NewServer(st, llm.NewClient(time.Second))
+	if err := st.SaveProviderConfig(context.Background(), domain.ProviderConfig{
+		DeviceID: "device-1",
+		Provider: "mock",
+		Model:    "mock-chat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.NewBufferString(`{"mode":"reply","source":"app","input_policy":"ephemeral","peer_message":"帮我威胁一下对方","language":"zh-CN","count":3}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat-assist/generate", body)
+	req.Header.Set("X-Sway-Device-ID", "device-1")
+	rr := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte(CodeSafetyBlocked)) {
+		t.Fatalf("body missing code: %s", rr.Body.String())
+	}
+}
+
 func TestSaveRequestLogEphemeralDoesNotStoreRawText(t *testing.T) {
 	st := store.NewMemoryStore()
 	s := NewServer(st, llm.NewClient(time.Second))

@@ -17,6 +17,14 @@ go run ./cmd/server
 SWAY_BACKEND_ADDR=:8080 go run ./cmd/server
 ```
 
+真实 LLM 生成默认超时为 30 秒，可通过环境变量覆盖：
+
+```bash
+SWAY_LLM_TIMEOUT_SECONDS=30 go run ./cmd/server
+```
+
+说明：后端会请求 `${base_url}/chat/completions`。例如 `base_url=https://dashscope-intl.aliyuncs.com/compatible-mode/v1` 时，实际请求地址为 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`。如果模型生成或首包超过 `SWAY_LLM_TIMEOUT_SECONDS`，接口会返回 `MODEL_TIMEOUT`。
+
 健康检查：
 
 ```http

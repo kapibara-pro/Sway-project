@@ -11,10 +11,11 @@ Sway（中文名：言和）是一款面向聊天场景的表达增强工具，�
 - [技术文档](docs/technical-design.md)
 - [开发排期](docs/development-plan.md)
 - [后端 API v1](docs/backend-api.md)
+- [iOS 联调说明](ios/README.md)
 
 ## 核心原则
 
 - 只做表达增强，不替用户聊天。
 - 只生成候选和插入文本，不自动发送。
 - 只处理用户主动输入、复制、粘贴或导入的上下文。
-- 默认不保存原始聊天内容，数据采集遵循最小化原则。
+- 历史和样本可保存 1 个月，App 需要提供清理入口；`ephemeral` 请求不保存原文。

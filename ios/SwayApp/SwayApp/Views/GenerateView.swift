@@ -1,9 +1,11 @@
 import SwiftUI
+import PhotosUI
 import UIKit
 
 struct GenerateView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = GenerateViewModel()
+    @State private var selectedPhotoItem: PhotosPickerItem?
 
     var body: some View {
         NavigationStack {
@@ -24,11 +26,29 @@ struct GenerateView: View {
                 }
 
                 Section("上下文") {
+                    HStack {
+                        Button("粘贴上下文") {
+                            viewModel.pasteContextFromClipboard()
+                        }
+                        .buttonStyle(.bordered)
+
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            HStack {
+                                if viewModel.isImportingImage {
+                                    ProgressView()
+                                }
+                                Text("OCR 导入")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.isImportingImage)
+                    }
+
                     TextEditor(text: $viewModel.peerMessage)
                         .frame(minHeight: 96)
                         .overlay(alignment: .topLeading) {
                             if viewModel.peerMessage.isEmpty {
-                                Text("粘贴对方消息或聊天上下文")
+                                Text(viewModel.peerMessagePlaceholder)
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 8)
                                     .padding(.leading, 4)
@@ -39,7 +59,7 @@ struct GenerateView: View {
                         .frame(minHeight: 80)
                         .overlay(alignment: .topLeading) {
                             if viewModel.draft.isEmpty {
-                                Text("可选：输入你原本想说的话")
+                                Text(viewModel.draftPlaceholder)
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 8)
                                     .padding(.leading, 4)
@@ -96,6 +116,14 @@ struct GenerateView: View {
                 }
             }
             .navigationTitle("生成回复")
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    let data = try? await item.loadTransferable(type: Data.self)
+                    await viewModel.importTextFromImageData(data)
+                    selectedPhotoItem = nil
+                }
+            }
         }
     }
 }

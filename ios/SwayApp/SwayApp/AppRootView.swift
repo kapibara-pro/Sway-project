@@ -15,6 +15,11 @@ struct AppRootView: View {
                     Label("模型", systemImage: "server.rack")
                 }
 
+            HistoryView()
+                .tabItem {
+                    Label("历史", systemImage: "clock.arrow.circlepath")
+                }
+
             SettingsView()
                 .tabItem {
                     Label("设置", systemImage: "gearshape")

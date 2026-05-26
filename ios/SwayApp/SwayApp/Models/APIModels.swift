@@ -181,6 +181,19 @@ struct Candidate: Identifiable, Codable, Equatable {
     }
 }
 
+struct GenerationHistoryEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    let createdAt: Date
+    let requestID: String
+    let mode: AssistMode
+    let language: AssistLanguage
+    let tone: AssistTone
+    let inputPolicy: InputPolicy
+    let peerMessage: String
+    let draft: String
+    let candidates: [Candidate]
+}
+
 struct Safety: Codable {
     let blocked: Bool
     let reason: String?

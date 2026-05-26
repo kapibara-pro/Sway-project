@@ -26,3 +26,22 @@ func TestLLMTimeoutFromEnv(t *testing.T) {
 		t.Fatalf("zero timeout=%s, want default 30s", got)
 	}
 }
+
+func TestBoolFromEnv(t *testing.T) {
+	t.Setenv("SWAY_LLM_DEBUG", "")
+	if boolFromEnv("SWAY_LLM_DEBUG") {
+		t.Fatal("empty env should be false")
+	}
+	t.Setenv("SWAY_LLM_DEBUG", "true")
+	if !boolFromEnv("SWAY_LLM_DEBUG") {
+		t.Fatal("true env should be true")
+	}
+	t.Setenv("SWAY_LLM_DEBUG", "1")
+	if !boolFromEnv("SWAY_LLM_DEBUG") {
+		t.Fatal("1 env should be true")
+	}
+	t.Setenv("SWAY_LLM_DEBUG", "false")
+	if boolFromEnv("SWAY_LLM_DEBUG") {
+		t.Fatal("false env should be false")
+	}
+}

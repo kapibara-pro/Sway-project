@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kapibara-pro/sway-project/backend/internal/domain"
 )
@@ -16,6 +18,8 @@ import (
 type Client struct {
 	HTTPClient *http.Client
 	Timeout    time.Duration
+	Debug      bool
+	Logger     *log.Logger
 }
 
 type GenerateInput struct {
@@ -60,6 +64,7 @@ func (c *Client) TestProvider(ctx context.Context, cfg domain.ProviderConfig) er
 func (c *Client) Generate(ctx context.Context, input GenerateInput) (GenerateOutput, error) {
 	cfg := input.ProviderConfig
 	if isMockProvider(cfg.Provider) {
+		c.debugf("mock_provider_generate model=%s mode=%s language=%s count=%d", cfg.Model, input.Request.Mode, input.Request.Language, input.Request.Count)
 		return mockGenerate(input.Request, cfg), nil
 	}
 	apiKey := strings.TrimSpace(cfg.EncryptedKey)
@@ -89,7 +94,8 @@ func (c *Client) Generate(ctx context.Context, input GenerateInput) (GenerateOut
 		return GenerateOutput{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	requestURL := baseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return GenerateOutput{}, err
 	}
@@ -100,15 +106,42 @@ func (c *Client) Generate(ctx context.Context, input GenerateInput) (GenerateOut
 	if hc == nil {
 		hc = http.DefaultClient
 	}
+	started := time.Now()
+	c.debugf("provider_request provider=%s model=%s url=%s mode=%s language=%s source=%s input_policy=%s peer_len=%d draft_len=%d count=%d timeout=%s",
+		cfg.Provider,
+		cfg.Model,
+		requestURL,
+		input.Request.Mode,
+		input.Request.Language,
+		input.Request.Source,
+		input.Request.InputPolicy,
+		utf8.RuneCountInString(input.Request.PeerMessage),
+		utf8.RuneCountInString(input.Request.Draft),
+		input.Request.Count,
+		c.Timeout,
+	)
 	resp, err := hc.Do(req)
 	if err != nil {
+		c.debugf("provider_transport_error provider=%s model=%s url=%s duration=%s error=%q", cfg.Provider, cfg.Model, requestURL, time.Since(started), sanitizeLogSnippet(err.Error(), 500))
 		return GenerateOutput{}, err
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	duration := time.Since(started)
+	providerRequestID := firstHeader(resp.Header, "X-Request-Id", "X-Request-ID", "Request-Id", "X-Dashscope-Request-Id")
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.debugf("provider_response_error provider=%s model=%s status=%d duration=%s provider_request_id=%s bytes=%d body=%q",
+			cfg.Provider,
+			cfg.Model,
+			resp.StatusCode,
+			duration,
+			providerRequestID,
+			len(respBody),
+			sanitizeLogSnippet(string(respBody), 1000),
+		)
 		return GenerateOutput{}, fmt.Errorf("provider status %d: %s", resp.StatusCode, string(respBody))
 	}
+	c.debugf("provider_response_ok provider=%s model=%s status=%d duration=%s provider_request_id=%s bytes=%d", cfg.Provider, cfg.Model, resp.StatusCode, duration, providerRequestID, len(respBody))
 
 	var parsed struct {
 		Choices []struct {
@@ -123,13 +156,16 @@ func (c *Client) Generate(ctx context.Context, input GenerateInput) (GenerateOut
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		c.debugf("provider_decode_error provider=%s model=%s duration=%s error=%q bytes=%d", cfg.Provider, cfg.Model, duration, sanitizeLogSnippet(err.Error(), 500), len(respBody))
 		return GenerateOutput{}, fmt.Errorf("decode provider response: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
+		c.debugf("provider_empty_choices provider=%s model=%s duration=%s", cfg.Provider, cfg.Model, duration)
 		return GenerateOutput{}, fmt.Errorf("provider returned no choices")
 	}
 	candidates, err := parseCandidates(parsed.Choices[0].Message.Content, input.Request)
 	if err != nil {
+		c.debugf("provider_candidate_parse_error provider=%s model=%s duration=%s error=%q content_len=%d", cfg.Provider, cfg.Model, duration, sanitizeLogSnippet(err.Error(), 500), len(parsed.Choices[0].Message.Content))
 		return GenerateOutput{}, err
 	}
 	return GenerateOutput{
@@ -146,6 +182,34 @@ func (c *Client) Generate(ctx context.Context, input GenerateInput) (GenerateOut
 
 func isMockProvider(provider string) bool {
 	return strings.EqualFold(strings.TrimSpace(provider), "mock")
+}
+
+func (c *Client) debugf(format string, args ...any) {
+	if c == nil || !c.Debug {
+		return
+	}
+	logger := c.Logger
+	if logger == nil {
+		logger = log.Default()
+	}
+	logger.Printf("llm debug: "+format, args...)
+}
+
+func firstHeader(header http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func sanitizeLogSnippet(value string, limit int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
+	if limit > 0 && len(value) > limit {
+		return value[:limit] + "...(truncated)"
+	}
+	return value
 }
 
 func parseCandidates(content string, req domain.GenerateRequest) ([]domain.Candidate, error) {

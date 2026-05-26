@@ -1,8 +1,14 @@
 package llm
 
 import (
+	"bytes"
+	"context"
+	"log"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kapibara-pro/sway-project/backend/internal/domain"
 )
@@ -103,6 +109,43 @@ func TestParseCandidatesValidatesContract(t *testing.T) {
 	}
 	if _, err := parseCandidates(`{"candidates":[{"text":""},{"text":"ok"},{"text":"ok"}]}`, req); err == nil {
 		t.Fatal("expected error for empty candidate text")
+	}
+}
+
+func TestGenerateDebugLogsProviderFailure(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Request-Id", "provider-req-1")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad api key"}}`))
+	}))
+	defer provider.Close()
+
+	var logs bytes.Buffer
+	client := NewClient(time.Second)
+	client.Debug = true
+	client.Logger = log.New(&logs, "", 0)
+
+	_, err := client.Generate(context.Background(), GenerateInput{
+		ProviderConfig: domain.ProviderConfig{
+			Provider:     "qwen",
+			BaseURL:      provider.URL,
+			Model:        "qwen-test",
+			EncryptedKey: "secret-key",
+		},
+		Request: testGenerateRequest(domain.ModeReply, "zh-CN"),
+		Prompt:  BuildPrompt(testGenerateRequest(domain.ModeReply, "zh-CN")),
+	})
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	got := logs.String()
+	for _, want := range []string{"provider_request", "provider_response_error", "status=401", "provider-req-1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "secret-key") {
+		t.Fatalf("debug log leaked api key:\n%s", got)
 	}
 }
 

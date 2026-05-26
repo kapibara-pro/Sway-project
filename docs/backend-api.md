@@ -25,6 +25,14 @@ SWAY_LLM_TIMEOUT_SECONDS=30 go run ./cmd/server
 
 说明：后端会请求 `${base_url}/chat/completions`。例如 `base_url=https://dashscope-intl.aliyuncs.com/compatible-mode/v1` 时，实际请求地址为 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`。如果模型生成或首包超过 `SWAY_LLM_TIMEOUT_SECONDS`，接口会返回 `MODEL_TIMEOUT`。
 
+排查真实 Provider 问题时可以临时开启 LLM debug 日志：
+
+```bash
+SWAY_LLM_DEBUG=true SWAY_LLM_TIMEOUT_SECONDS=30 go run ./cmd/server
+```
+
+日志会记录 provider、model、实际请求 URL、mode、language、输入长度、超时、HTTP 状态码、provider request id、耗时和错误体摘要。日志不会打印 API Key，也不会打印用户原始聊天内容。
+
 健康检查：
 
 ```http

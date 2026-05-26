@@ -18,8 +18,10 @@ func main() {
 		addr = ":8080"
 	}
 	llmTimeout := llmTimeoutFromEnv()
-	srv := api.NewServer(store.NewMemoryStore(), llm.NewClient(llmTimeout))
-	log.Printf("Sway backend listening on %s, llm_timeout=%s", addr, llmTimeout)
+	llmClient := llm.NewClient(llmTimeout)
+	llmClient.Debug = boolFromEnv("SWAY_LLM_DEBUG")
+	srv := api.NewServer(store.NewMemoryStore(), llmClient)
+	log.Printf("Sway backend listening on %s, llm_timeout=%s, llm_debug=%t", addr, llmTimeout, llmClient.Debug)
 	if err := http.ListenAndServe(addr, srv.Routes()); err != nil {
 		log.Fatal(err)
 	}
@@ -37,4 +39,13 @@ func llmTimeoutFromEnv() time.Duration {
 		return defaultTimeout
 	}
 	return time.Duration(seconds) * time.Second
+}
+
+func boolFromEnv(key string) bool {
+	switch os.Getenv(key) {
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	default:
+		return false
+	}
 }

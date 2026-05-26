@@ -6,9 +6,18 @@ Sway 技术方案采用“主 App + iOS Keyboard Extension + 后端 AI Gateway�
 
 - 主 App 承担完整流程、账号、订阅、隐私设置和无权限兜底。
 - Keyboard Extension 作为轻量输入入口，只负责用户主动提供文本后的候选生成与插入。
-- 后端负责模型调用、Prompt 编排、安全策略、限流计费和指标统计。
+- 后端负责用户自配 LLM Provider 的代理调用、Prompt 编排、安全策略、限流和指标统计。
 
 设计重点是稳定、低延迟、隐私最小化和符合 iOS 权限边界。
+
+首版范围：
+
+- iOS only。
+- P0 直接包含主 App 与 iOS Keyboard Extension。
+- 账号、订阅和会员后置到 P3。
+- LLM Provider 由用户在 App 内配置，首版由后端代理调用。
+- 历史和样本允许保存，保留 1 个月。
+- 发布方式为 TestFlight 内测。
 
 ## 2. 总体架构
 
@@ -27,7 +36,8 @@ Keyboard Extension ------+
   v
 Backend AI Gateway
   |
-  +-- Auth / Rate Limit / Billing
+  +-- Provider Config Proxy
+  +-- Auth / Rate Limit
   +-- Prompt & Policy Service
   +-- Safety Filter
   +-- Model Provider
@@ -76,18 +86,18 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 
 - Onboarding 与输入法安装引导。
 - Full Access 权限解释。
-- 登录、订阅、额度展示。
+- Provider 配置、连通性测试和配置清除。
 - App 内输入/粘贴生成。
 - 截图 OCR 导入预留。
 - 收藏模板与个人风格设置。
-- 隐私设置与数据保存策略。
+- 隐私设置、历史/样本保存说明和清除入口。
 - 问题反馈与 request_id 收集。
 
 建议技术栈：
 
 - Swift。
 - SwiftUI 或 UIKit 均可，若项目需要快速落地可用 SwiftUI 主 App + UIKit Keyboard Extension。
-- Keychain 存储敏感 token。
+- Keychain 存储设备标识、会话凭证等敏感本地信息。
 - App Group 存储语气偏好、模板缓存和非敏感配置。
 
 ### 4.2 Keyboard Extension
@@ -115,12 +125,14 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 职责：
 
 - API 鉴权。
-- 限流和额度。
-- 模型路由。
+- 用户设备/安装 ID 识别。
+- Provider 配置加密存储。
+- 限流。
+- 模型代理调用。
 - Prompt 模板选择。
 - 内容安全检测。
 - 成本、延迟和错误指标。
-- 默认只记录元信息，不记录原文。
+- 历史和样本 1 个月 TTL 存储。
 
 ### 5.2 Prompt & Policy Service
 
@@ -135,7 +147,47 @@ iOS 16 之后，跨 App 读取剪贴板可能触发系统粘贴授权提示。�
 
 ## 6. API 契约
 
-### 6.1 生成接口
+### 6.1 Provider 配置接口
+
+客户端通过主 App 配置用户自有 LLM Provider。Keyboard Extension 只读取配置状态，未配置时提示回主 App。
+
+```http
+GET /api/v1/providers/status
+```
+
+返回是否已配置、provider、model、base_url 掩码展示、最后校验时间，不返回 API Key。
+
+```http
+PUT /api/v1/providers/config
+Content-Type: application/json
+```
+
+请求示例：
+
+```json
+{
+  "provider": "openai",
+  "base_url": "https://api.openai.com/v1",
+  "model": "gpt-4.1-mini",
+  "api_key": "sk-..."
+}
+```
+
+服务端必须加密存储 API Key，日志不得打印 API Key，状态接口只能返回掩码。
+
+```http
+POST /api/v1/providers/test
+```
+
+使用一条短 prompt 做连通性测试，返回统一错误码。
+
+```http
+DELETE /api/v1/providers/config
+```
+
+清除用户 Provider 配置。
+
+### 6.2 生成接口
 
 ```http
 POST /api/v1/chat-assist/generate
@@ -149,7 +201,7 @@ Authorization: Bearer <token>
 {
   "mode": "reply",
   "source": "keyboard",
-  "input_policy": "ephemeral",
+  "input_policy": "store_allowed",
   "peer_message": "你今天怎么都不找我聊天？",
   "draft": "",
   "tone": "gentle",
@@ -170,7 +222,7 @@ Authorization: Bearer <token>
 
 - `mode`：`rewrite | reply | opener | comfort | apologize | reject`。
 - `source`：`keyboard | app`。
-- `input_policy`：`ephemeral | store_allowed`，默认 `ephemeral`。
+- `input_policy`：`ephemeral | store_allowed`，首版允许 `store_allowed`，历史与样本保留 1 个月。
 - `peer_message`：对方消息，可空，第一版上限 1000 字。
 - `draft`：用户草稿，可空，第一版上限 500 字。
 - `tone`：`gentle | humorous | flirty | sincere | concise | proactive | restrained`。
@@ -208,7 +260,7 @@ Authorization: Bearer <token>
 
 候选文案建议每条控制在 80 字以内。
 
-### 6.2 错误响应
+### 6.3 错误响应
 
 ```json
 {
@@ -232,6 +284,9 @@ Authorization: Bearer <token>
 - `MODEL_TIMEOUT`：模型超时。
 - `RATE_LIMITED`：额度或频控限制。
 - `SERVICE_UNAVAILABLE`：后端临时不可用。
+- `PROVIDER_NOT_CONFIGURED`：用户还没有配置 LLM Provider。
+- `PROVIDER_AUTH_FAILED`：Provider API Key 无效或权限不足。
+- `PROVIDER_TEST_FAILED`：Provider 连通性测试失败。
 
 客户端应按 `code` 做分流，展示本地化文案和 `fallback_suggestion`，不要直接暴露技术错误。
 
@@ -239,24 +294,31 @@ Authorization: Bearer <token>
 
 建议表：
 
-- `chat_assist_requests`：request_id、user_id、mode、tone、source、model、latency、usage、risk、created_at；默认不存原文。
+- `chat_assist_requests`：request_id、user_id/device_id、mode、tone、source、model、latency、usage、risk、created_at。
 - `chat_assist_feedback`：request_id、candidate_id、action、reason、created_at。
 - `user_style_profiles`：用户语气偏好、禁用风格、常用语言。
 - `saved_templates`：用户收藏话术。
 - `prompt_versions`：场景 Prompt、版本、灰度配置。
+- `provider_configs`：用户 Provider、base_url、model、API Key 密文、最后校验时间。
+- `chat_histories`：用户生成历史，按 1 个月 TTL 清理。
+- `quality_samples`：允许保存的样本，按 1 个月 TTL 清理。
 
 数据策略：
 
+- 历史与样本保留 1 个月。
+- App 内提供清除入口。
 - `input_policy=ephemeral` 时不落原文。
-- `input_policy=store_allowed` 仅在用户明确授权时使用。
+- `input_policy=store_allowed` 时按 1 个月 TTL 保存。
 - 日志默认只存元信息、错误码、延迟、token、风险标签。
 
 ## 8. 安全与隐私
 
 - HTTPS 全链路传输。
-- Token 存 Keychain，避免明文落盘。
+- iOS 本地敏感信息存 Keychain，避免明文落盘。
+- Provider API Key 在服务端加密存储，接口响应不得明文返回。
+- 服务端日志不得打印 API Key。
 - App Group 只存非敏感配置。
-- 默认不保存原始聊天内容。
+- 历史与样本保存 1 个月，提供清除入口。
 - 不后台读取剪贴板。
 - 不自动读取通讯录。
 - 不承诺读取第三方聊天 App 完整上下文。
@@ -271,37 +333,48 @@ Authorization: Bearer <token>
 
 ## 10. 降级策略
 
+- Provider 未配置：提示回主 App 配置模型。
 - Full Access 未开启：提示去主 App 生成，或使用本地模板。
 - 网络不可用：本地模板 + 重试。
 - 模型超时：展示 `fallback_suggestion`。
-- 超额度：展示额度说明和会员入口。
+- 频控限制：提示稍后重试。
 - 安全拒绝：展示健康表达建议。
 
 ## 11. 开发阶段
 
-### P0：App 内生成
+### P0：iOS 内测 MVP
 
 - 建立仓库结构。
+- iOS 主 App。
+- iOS Keyboard Extension。
+- Provider 配置页与连通性测试。
 - 实现后端生成 API。
 - 主 App 内输入/粘贴生成。
+- 键盘内改写、回复和插入候选。
 - Prompt 与安全策略回归。
+- 历史与样本 1 个月 TTL。
 
-### P1：Keyboard Extension
+### P1：输入法体验完善
 
-- 实现键盘 UI。
-- 接入 Full Access 联网。
-- 接入 App Group 配置。
-- 插入候选文本。
+- Full Access 引导和异常兜底。
 - 完成常见 App 兼容矩阵。
+- 主流 iPhone 和 iPad 适配。
+- TestFlight 内测反馈修复。
 
-### P2：账号、订阅和反馈
+### P2：反馈与质量
+
+- 收藏模板。
+- 反馈数据。
+- 质量、延迟、成本看板。
+
+### P3：账号与商业化
 
 - 用户体系。
 - 会员和额度。
-- 收藏模板。
-- 反馈数据。
+- IAP。
+- 商业化实验。
 
-### P3：体验优化
+### P4：体验优化
 
 - 个性化语气。
 - 多语言。

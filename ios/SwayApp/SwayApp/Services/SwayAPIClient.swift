@@ -4,11 +4,13 @@ final class SwayAPIClient {
     private let session: URLSession
     private let jsonEncoder: JSONEncoder
     private let jsonDecoder: JSONDecoder
+    private let requestTimeout: TimeInterval
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, requestTimeout: TimeInterval = 30) {
         self.session = session
         self.jsonEncoder = JSONEncoder()
         self.jsonDecoder = JSONDecoder()
+        self.requestTimeout = requestTimeout
     }
 
     func providerStatus(baseURL: URL, deviceID: String) async throws -> ProviderStatus {
@@ -45,7 +47,7 @@ final class SwayAPIClient {
         let url = makeURL(baseURL: baseURL, cleanedPath: cleanedPath)
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 8
+        request.timeoutInterval = requestTimeout
         request.setValue(deviceID, forHTTPHeaderField: "X-Sway-Device-ID")
         return request
     }

@@ -136,6 +136,8 @@ http://127.0.0.1:8080
 
 mock provider 不会调用真实 LLM，也不需要 API Key，适合 M1 smoke。
 
+真实 Provider 生成可能比 mock 慢。主 App 当前请求超时为 30 秒，用于匹配后端真实 LLM 调用；如果使用 DashScope、Qwen 等真实模型，首次生成或复杂 prompt 可能需要等待一段时间。
+
 ### 6. 生成 3 条候选
 
 进入“生成”页：
